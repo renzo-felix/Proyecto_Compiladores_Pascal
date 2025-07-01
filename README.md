@@ -3,8 +3,8 @@ title: "Compilador Pascal con Arrays y Punteros"
 subtitle: "Proyecto Final - Compiladores"
 author: 
   - "Felix Aponte Renzo Josimar"
-  - "Kayla De Vivanco Briceño" 
-  - "David Mauricio Jacobo Ruiz"
+  - "Manyory Cueva " 
+  - " Canto Harod"
 date: "2024-2"
 institute: "Universidad de Ingeniería y Tecnología"
 documentclass: article
@@ -37,62 +37,142 @@ El compilador abarca las fases esenciales: análisis léxico, sintáctico, semá
 
 - Implementar un compilador completo para un subconjunto de Pascal
 - Soportar arrays unidimensionales con rangos arbitrarios
-- Manejar punteros y gestión dinámica de memoria
-- Generar código ensamblador x86-64 ejecutable
-- Proporcionar una interfaz web para pruebas y validación
 
-# Descripción del Lenguaje: Pascal con Arrays y Punteros
 
-El lenguaje soportado por el compilador es un subconjunto de Pascal, que incluye:
+# Descripción del Lenguaje
 
-- **Tipos básicos**: Integer, Boolean, Char, Real, String, Longint
-- **Arrays unidimensionales**: Con rangos arbitrarios (ej: `array[0..4]`, `array[1..10]`)
-- **Punteros**: Declaración, asignación de direcciones, desreferenciación
-- **Sentencias**: Asignación, escritura (`writeln`), condicionales (`if-then-else`), bucles (`while`, `for`)
-- **Funciones**: Definición y llamadas con parámetros
-- **Gestión de memoria**: `new` y `dispose` para punteros
+El lenguaje que procesamos en este proyecto es un **Pascal extendido** con soporte para:
 
-## Gramática del Lenguaje
+- Variables de tipos básicos (Integer, Boolean)
+- Arrays estáticos con rangos definidos (ejemplo: `array[1..6] of Integer`)
+- Punteros y operaciones de new/dispose
+- Acceso a direcciones (`@`), desreferenciación (`^`)
+- Funciones y procedimientos con parámetros por valor o referencia
+- Estructuras de control: asignación, if, while, for, writeln
 
-La gramática utilizada es LL(1), permitiendo un análisis sintáctico descendente recursivo:
+El diseño de la gramática sigue un enfoque **LL(1)** y fue escrita de forma explícita para permitir un análisis sintáctico descendente recursivo.
 
-```
-Program ::= 'program' ID ';' [TYPE] [VAR] [FUNCTION] 'begin' StatementList 'end' '.'
+A continuación un **resumen de la gramática más relevante** (basado en nuestro archivo `gramatica.txt`):
 
-TYPE ::= 'type' TypeDef {TypeDef}
+## Gramática Resumida
+/* ──────────/* ──────────────────────────────────────────────────────────────
+*  PROGRAMA PRINCIPAL
+* ────────────────────────────────────────────────────────────── */
+* 
+  Programa ::= "program" id ";"  
+  BloqueDeclaraciones*  
+  CuerpoPrincipal  
+  "."
 
-VAR ::= 'var' VarDec {VarDec}
+/* ──────────────────────────────────────────────────────────────
+*  BLOQUES DE DECLARACIÓN  (en cualquier orden)
+* ────────────────────────────────────────────────────────────── */
+* 
+  BloqueDeclaraciones ::= BloqueTipos
+  | BloqueVariables  
+  | BloqueSubprogramas
 
-VarDec ::= IDList ':' Type ';'
+/* --------------------  DECLARACIÓN DE TIPOS ------------------- */
 
-Type ::= 'Integer' | 'Boolean' | 'array' '[' NUM '..' NUM ']' 'of' Type | '^' Type
+BloqueTipos      ::= "type" (DeclTipo)+
+DeclTipo         ::= id "=" Tipo ";"
 
-StatementList ::= Statement {';' Statement}
+/* ---------------  DECLARACIÓN DE VARIABLES  ------------------- */
 
-Statement ::= AssignStatement | PrintStatement | IfStatement | WhileStatement | ForStatement
+BloqueVariables  ::= "var" (DeclVariable)+
+DeclVariable     ::= ListaIdentificadores ":" Tipo ";"
+ListaIdentificadores ::= id ("," id)*
 
-AssignStatement ::= LValue ':=' Expression
+/* -------------  DECLARACIÓN DE SUBPROGRAMAS ------------------- */
 
-LValue ::= ID | ID '[' Expression ']' | ID '^'
+BloqueSubprogramas ::= Subprograma*
+Subprograma      ::= ("function" | "procedure") id
+"(" [ListaParametros] ")"
+[":" Tipo]              /* sólo en functions */
+";" CuerpoSubprograma "end" ";"
 
-Expression ::= ExprRel {RelOp ExprRel}
+ListaParametros  ::= Parametro (";" Parametro)*
+Parametro        ::= [ModoParametro] ListaIdentificadores ":" Tipo
+ModoParametro    ::= "var" | "const" | "out"
 
-ExprRel ::= ExprOr {'or' ExprOr}
+CuerpoSubprograma ::= BloqueDeclaraciones*
+"begin" ListaSentencias "end"
 
-ExprOr ::= ExprAnd {'and' ExprAnd}
+/* ---------------------  CUERPO PRINCIPAL ---------------------- */
 
-ExprAnd ::= ExprNot {'not' ExprNot}
+CuerpoPrincipal  ::= "begin" ListaSentencias "end"
 
-ExprNot ::= ['not'] ExprAdd
+/* ──────────────────────────────────────────────────────────────
+*  SENTENCIAS
+* ────────────────────────────────────────────────────────────── */
+* 
+  ListaSentencias  ::= Sentencia (";" Sentencia)* [";"]
 
-ExprAdd ::= Term {AddOp Term}
+Sentencia ::= id ":=" Expr
+| AccesoArray ":=" Expr
+| Desreferencia ":=" Expr
+| "writeln" "(" [ListaArgs] ")"
+| "if" Expr "then" Sentencia ["else" Sentencia]
+| "if" Expr "then" "begin" ListaSentencias "end"
+["else" "begin" ListaSentencias "end"]
+| "while" Expr "do" Sentencia
+| "while" Expr "do" "begin" ListaSentencias "end"
+| "for" id ":=" Expr "to" Expr "do" Sentencia
+| "for" id ":=" Expr "to" Expr "do"
+"begin" ListaSentencias "end"
+| id "(" [ListaArgs] ")"
+| "break"
 
-Term ::= Factor {MulOp Factor}
+/* ──────────────────────────────────────────────────────────────
+*  EXPRESIONES  (precedencia real de Pascal)
+* ────────────────────────────────────────────────────────────── */
+* 
+  Expr        ::= ExprRel
+  ExprRel     ::= ExprOr [OperRel ExprOr]
+  OperRel     ::= "<" | "<=" | ">" | ">=" | "=" | "<>"
+  ExprOr      ::= ExprAnd ("or" ExprAnd)*
+  ExprAnd     ::= ExprAdd ("and" ExprAdd)*
+  ExprAdd     ::= ExprMul (("+" | "-") ExprMul)*
+  ExprMul     ::= ExprUnary (("*" | "/" | "div" | "mod") ExprUnary)*
+  ExprUnary   ::= "not" ExprUnary | Factor
+  Factor      ::= id
+  | "(" Expr ")"
+  | id "(" [ListaArgs] ")"
+  | AccesoArray
+  | Desreferencia
+  | Direccion
+  | NUM
+  | Bool
 
-Factor ::= NUM | ID | '(' Expression ')' | ID '[' Expression ']' | ID '^' | '@' ID | FunctionCall
+/* ──────────────────────────────────────────────────────────────
+*  TIPOS
+* ────────────────────────────────────────────────────────────── */
+* 
+  Tipo        ::= TipoBasico
+  | TipoArray
+  | TipoPuntero
 
-FunctionCall ::= ID '(' [Expression {',' Expression}] ')'
-```
+TipoBasico  ::= id
+| "Integer"
+| "Longint"
+| "Boolean"
+| "Char"
+| "Real"
+| "String"
+
+TipoArray   ::= "array" "[" Rango "]" "of" TipoBasico
+Rango       ::= NUM ".." NUM
+TipoPuntero ::= "^" TipoBasico
+
+/* ──────────────────────────────────────────────────────────────
+*  OTROS CONSTRUCTOS
+* ────────────────────────────────────────────────────────────── */
+* 
+  AccesoArray   ::= id "[" Expr "]"
+  Desreferencia ::= id "^"
+  Direccion     ::= "@" id
+  ListaArgs     ::= Expr ("," Expr)*
+  Bool          ::= "true" | "false" | "nil"
 
 # Fases del Compilador
 
